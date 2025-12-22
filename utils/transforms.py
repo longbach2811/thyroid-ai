@@ -41,6 +41,10 @@ def _get_test_transforms(imgsz=512):
                 border_mode=0,
                 value=0          
             ),
+            A.Normalize(
+            mean=(0.485, 0.456, 0.406),
+            std=(0.229, 0.224, 0.225)
+            ),
             ToTensorV2()
         ]
     )

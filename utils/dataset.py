@@ -43,10 +43,10 @@ class ImageFolder(Dataset):
 
 
 if __name__ == "__main__":
-    from utils.transforms import _get_train_transforms
+    from transforms import _get_train_transforms
 
     dataset = ImageFolder(
-        root_dir="data/train", transform=_get_train_transforms(imgsz=224)
+        root_dir=r"D:\workspace\dataset\TN5000_extracted", transform=_get_train_transforms(imgsz=224)
     )
     print(f"Dataset size: {len(dataset)}")
     img, label = dataset[0]
