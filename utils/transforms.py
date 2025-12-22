@@ -10,8 +10,8 @@ def _get_train_transforms(imgsz=512):
         A.PadIfNeeded(
             min_height=imgsz,
             min_width=imgsz,
-            border_mode=0,      
-            value=0            
+            border_mode=cv2.BORDER_CONSTANT,
+            fill=0            
         ),
 
         A.HorizontalFlip(p=0.5),
@@ -38,8 +38,8 @@ def _get_test_transforms(imgsz=512):
             A.PadIfNeeded(
                 min_height=imgsz,
                 min_width=imgsz,
-                border_mode=0,
-                value=0          
+                border_mode=cv2.BORDER_CONSTANT,
+                fill=0          
             ),
             A.Normalize(
             mean=(0.485, 0.456, 0.406),
