@@ -16,12 +16,17 @@ def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Load dataset
+    print("Loading datasets...")
     train_dataset = ImageFolder(
         root_dir=args.train_data, transform=_get_train_transforms(imgsz=args.img_size)
     )
     val_dataset = ImageFolder(
         root_dir=args.val_data, transform=_get_test_transforms(imgsz=args.img_size)
     )
+    test_dataset = ImageFolder(
+        root_dir=args.test_data, transform=_get_test_transforms(imgsz=args.img_size)
+    )
+
 
     train_loader = DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=0
@@ -29,6 +34,10 @@ def main(args):
     val_loader = DataLoader(
         val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0
     )
+    test_loader = DataLoader(
+        test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0
+    )
+
 
     num_classes = len(train_dataset.class_names)
 
@@ -56,16 +65,19 @@ def main(args):
         else None
     )
 
+    print("Starting training...")
+    
     # Training loops
     training_loops(
-        model,
-        train_loader,
-        val_loader,
-        criterion,
-        optimizer,
-        device,
-        args.epochs,
-        args.save_path,
+        model=model,
+        train_dataloader=train_loader,
+        val_dataloader=val_loader,
+        test_dataloader=test_loader,
+        criterion=criterion,
+        optimizer=optimizer,
+        device=device,
+        num_epochs=args.epochs,
+        save_path=args.save_path,
         period=args.save_period,
         scheduler=scheduler,
         patience=args.patience,
@@ -77,16 +89,20 @@ def parse_args():
     parser.add_argument(
         "--train_data",
         type=str,
-        required=True,
         help="Path to training data",
-        default=None,
+        default="TN5000_split/train",
     )
     parser.add_argument(
         "--val_data",
         type=str,
-        required=True,
         help="Path to validation data",
-        default=None,
+        default="TN5000_split/val",
+    ),
+    parser.add_argument(
+        "--test_data",
+        type=str,
+        help="Path to test data",
+        default="TN5000_split/test",
     )
     parser.add_argument(
         "--model",
@@ -95,7 +111,7 @@ def parse_args():
         default="resnet18",
     )
     parser.add_argument(
-        "--weights", type=str, default=None, help="Path to pre-trained weights"
+        "--weights", type=str, default=True, help="Path to pre-trained weights"
     )
     parser.add_argument(
         "--loss", type=str, default="focal", help="Loss function"
