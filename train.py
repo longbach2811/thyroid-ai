@@ -92,7 +92,7 @@ def parse_args():
         "--model",
         type=str,
         help="Model architecture",
-        default="resnet50",
+        default="resnet18",
     )
     parser.add_argument(
         "--weights", type=str, default=None, help="Path to pre-trained weights"
