@@ -27,6 +27,7 @@ class FocalLoss(nn.Module):
         focal_loss = (1 - pt) ** self.gamma * ce_loss
 
         if self.weight is not None:
+            self.weight = self.weight.to(targets.device)
             focal_loss = self.weight[targets] * focal_loss
 
         return focal_loss.mean()
