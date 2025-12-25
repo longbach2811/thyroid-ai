@@ -6,6 +6,7 @@ from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 from sklearn.metrics import precision_score, recall_score, roc_auc_score
 import torch.optim.lr_scheduler as lr_scheduler
+from torchvision.utils import save_image
 
 
 def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch, num_epochs):
@@ -60,12 +61,17 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch, num_
     return epoch_loss, precision, recall, auc
 
 
-def validate_one_epoch(model, dataloader, criterion, device, epoch, num_epochs):
+def validate_one_epoch(
+    model, dataloader, criterion, device, epoch, num_epochs, writer=None, tag="Val", save_dir=None
+):
     model.eval()
     running_loss = 0.0
     probs_list = []
     preds_list = []
     targets_list = []
+    misclassified_imgs = []
+    misclassified_preds = []
+    misclassified_targets = []
 
     with torch.no_grad():
         for images, labels in tqdm(
@@ -84,6 +90,15 @@ def validate_one_epoch(model, dataloader, criterion, device, epoch, num_epochs):
             probs_list.append(probs.cpu().numpy())
             preds_list.append(preds.cpu().numpy())
             targets_list.append(labels.cpu().numpy())
+
+            if writer is not None or save_dir is not None:
+                incorrect = preds != labels
+                if incorrect.any():
+                    idxs = incorrect.nonzero(as_tuple=True)[0]
+                    for idx in idxs:
+                        misclassified_imgs.append(images[idx].cpu())
+                        misclassified_preds.append(preds[idx].item())
+                        misclassified_targets.append(labels[idx].item())
 
     epoch_loss = running_loss / len(dataloader.dataset)
 
@@ -104,6 +119,31 @@ def validate_one_epoch(model, dataloader, criterion, device, epoch, num_epochs):
             )
     except ValueError:
         auc = 0.0
+
+    if writer is not None and len(misclassified_imgs) > 0:
+        vis_imgs = torch.stack(misclassified_imgs[:16])
+        mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+        std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+        vis_imgs = vis_imgs * std + mean
+        vis_imgs = torch.clamp(vis_imgs, 0, 1)
+        writer.add_images(f"{tag}/Misclassified_Images", vis_imgs, epoch)
+        text_log = "  \n".join(
+            [
+                f"Img {i}: True={t}, Pred={p}"
+                for i, (t, p) in enumerate(zip(misclassified_targets[:16], misclassified_preds[:16]))
+            ]
+        )
+        writer.add_text(f"{tag}/Misclassified_Details", text_log, epoch)
+
+    if save_dir is not None and len(misclassified_imgs) > 0:
+        save_folder = os.path.join(save_dir, f"misclassified", tag, f"epoch_{epoch+1}")
+        os.makedirs(save_folder, exist_ok=True)
+        mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+        std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+        for i, (img, t, p) in enumerate(zip(misclassified_imgs, misclassified_targets, misclassified_preds)):
+            img = img * std + mean
+            img = torch.clamp(img, 0, 1)
+            save_image(img, os.path.join(save_folder, f"img_{i}_true_{t}_pred_{p}.png"))
 
     return epoch_loss, precision, recall, auc
 
@@ -132,10 +172,10 @@ def training_loops(
             model, train_dataloader, criterion, optimizer, device, epoch, num_epochs
         )
         val_loss, val_precision, val_recall, val_auc = validate_one_epoch(
-            model, val_dataloader, criterion, device, epoch, num_epochs
+            model, val_dataloader, criterion, device, epoch, num_epochs, writer=writer, tag="Val", save_dir=save_path
         )
         test_loss, test_precision, test_recall, test_auc = validate_one_epoch(
-            model, test_dataloader, criterion, device, epoch, num_epochs
+            model, test_dataloader, criterion, device, epoch, num_epochs, writer=writer, tag="Test", save_dir=save_path
         )
 
         print(f"Epoch [{epoch+1}/{num_epochs}]")
