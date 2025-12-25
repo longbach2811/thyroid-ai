@@ -96,9 +96,10 @@ def validate_one_epoch(
             if incorrect.any():
                 idxs = incorrect.nonzero(as_tuple=True)[0]
                 for idx in idxs:
-                    misclassified_imgs.append(images[idx].cpu())
-                    misclassified_preds.append(preds[idx].item())
-                    misclassified_targets.append(labels[idx].item())
+                    if len(misclassified_imgs) < 200: 
+                        misclassified_imgs.append(images[idx].cpu())
+                        misclassified_preds.append(preds[idx].item())
+                        misclassified_targets.append(labels[idx].item())
 
     epoch_loss = running_loss / len(dataloader.dataset)
 
@@ -127,9 +128,7 @@ def _save_misclassified(writer, epoch, tag, mis_info, save_root):
     imgs, targets, preds = mis_info
     if len(imgs) == 0:
         return
-
-    # 1. Hien thi len TensorBoard (Gioi han 16 anh)
-    vis_imgs = torch.stack(imgs[:16])
+    vis_imgs = torch.stack(imgs[:8])
     mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
     std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
     vis_imgs = (vis_imgs * std + mean) * 255.0
@@ -137,7 +136,7 @@ def _save_misclassified(writer, epoch, tag, mis_info, save_root):
 
     writer.add_images(f"{tag}/Misclassified_Images", vis_imgs, 0)
     text_log = "  \n".join(
-        [f"Img {i}: True={t}, Pred={p}" for i, (t, p) in enumerate(zip(targets[:16], preds[:16]))]
+        [f"Img {i}: True={t}, Pred={p}" for i, (t, p) in enumerate(zip(targets[:8], preds[:8]))]
     )
     writer.add_text(f"{tag}/Misclassified_Details", text_log, 0)
 
