@@ -1,4 +1,5 @@
 import os
+import shutil
 from torch.utils.data import Dataset
 import torch
 import numpy as np
@@ -62,7 +63,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch, num_
 
 
 def validate_one_epoch(
-    model, dataloader, criterion, device, epoch, num_epochs, writer=None, tag="Val", save_dir=None
+    model, dataloader, criterion, device, epoch, num_epochs
 ):
     model.eval()
     running_loss = 0.0
@@ -91,14 +92,13 @@ def validate_one_epoch(
             preds_list.append(preds.cpu().numpy())
             targets_list.append(labels.cpu().numpy())
 
-            if writer is not None or save_dir is not None:
-                incorrect = preds != labels
-                if incorrect.any():
-                    idxs = incorrect.nonzero(as_tuple=True)[0]
-                    for idx in idxs:
-                        misclassified_imgs.append(images[idx].cpu())
-                        misclassified_preds.append(preds[idx].item())
-                        misclassified_targets.append(labels[idx].item())
+            incorrect = preds != labels
+            if incorrect.any():
+                idxs = incorrect.nonzero(as_tuple=True)[0]
+                for idx in idxs:
+                    misclassified_imgs.append(images[idx].cpu())
+                    misclassified_preds.append(preds[idx].item())
+                    misclassified_targets.append(labels[idx].item())
 
     epoch_loss = running_loss / len(dataloader.dataset)
 
@@ -120,32 +120,36 @@ def validate_one_epoch(
     except ValueError:
         auc = 0.0
 
-    if writer is not None and len(misclassified_imgs) > 0:
-        vis_imgs = torch.stack(misclassified_imgs[:16])
-        mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
-        std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
-        vis_imgs = vis_imgs * std + mean
-        vis_imgs = torch.clamp(vis_imgs, 0, 1)
-        writer.add_images(f"{tag}/Misclassified_Images", vis_imgs, epoch)
-        text_log = "  \n".join(
-            [
-                f"Img {i}: True={t}, Pred={p}"
-                for i, (t, p) in enumerate(zip(misclassified_targets[:16], misclassified_preds[:16]))
-            ]
-        )
-        writer.add_text(f"{tag}/Misclassified_Details", text_log, epoch)
+    return epoch_loss, precision, recall, auc, (misclassified_imgs, misclassified_targets, misclassified_preds)
 
-    if save_dir is not None and len(misclassified_imgs) > 0:
-        save_folder = os.path.join(save_dir, f"misclassified", tag, f"epoch_{epoch+1}")
-        os.makedirs(save_folder, exist_ok=True)
-        mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
-        std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
-        for i, (img, t, p) in enumerate(zip(misclassified_imgs, misclassified_targets, misclassified_preds)):
-            img = img * std + mean
-            img = torch.clamp(img, 0, 1)
-            save_image(img, os.path.join(save_folder, f"img_{i}_true_{t}_pred_{p}.png"))
 
-    return epoch_loss, precision, recall, auc
+def _save_misclassified(writer, epoch, tag, mis_info, save_root):
+    imgs, targets, preds = mis_info
+    if len(imgs) == 0:
+        return
+
+    # 1. Hien thi len TensorBoard (Gioi han 16 anh)
+    vis_imgs = torch.stack(imgs[:16])
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+    std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+    vis_imgs = (vis_imgs * std + mean) * 255.0
+    vis_imgs = torch.clamp(vis_imgs, 0, 255).to(torch.uint8)
+
+    writer.add_images(f"{tag}/Misclassified_Images", vis_imgs, 0)
+    text_log = "  \n".join(
+        [f"Img {i}: True={t}, Pred={p}" for i, (t, p) in enumerate(zip(targets[:16], preds[:16]))]
+    )
+    writer.add_text(f"{tag}/Misclassified_Details", text_log, 0)
+
+    save_folder = os.path.join(save_root, tag.lower())
+    os.makedirs(save_folder, exist_ok=True)
+
+    mean_cpu = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+    std_cpu = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+    for i, (img, t, p) in enumerate(zip(imgs, targets, preds)):
+        img = img * std_cpu + mean_cpu
+        img = torch.clamp(img, 0, 1)
+        save_image(img.float(), os.path.join(save_folder, f"epoch_{epoch+1}_img_{i}_true_{t}_pred_{p}.png"))
 
 
 def training_loops(
@@ -171,11 +175,11 @@ def training_loops(
         train_loss, train_precision, train_recall, train_auc = train_one_epoch(
             model, train_dataloader, criterion, optimizer, device, epoch, num_epochs
         )
-        val_loss, val_precision, val_recall, val_auc = validate_one_epoch(
-            model, val_dataloader, criterion, device, epoch, num_epochs, writer=writer, tag="Val", save_dir=save_path
+        val_loss, val_precision, val_recall, val_auc, val_mis_info = validate_one_epoch(
+            model, val_dataloader, criterion, device, epoch, num_epochs
         )
-        test_loss, test_precision, test_recall, test_auc = validate_one_epoch(
-            model, test_dataloader, criterion, device, epoch, num_epochs, writer=writer, tag="Test", save_dir=save_path
+        test_loss, test_precision, test_recall, test_auc, test_mis_info = validate_one_epoch(
+            model, test_dataloader, criterion, device, epoch, num_epochs
         )
 
         print(f"Epoch [{epoch+1}/{num_epochs}]")
@@ -217,6 +221,15 @@ def training_loops(
             epochs_no_improve = 0
             torch.save(model.state_dict(), os.path.join(save_path, "best_model.pth"))
             print("Best model saved.")
+
+            # Clean up old misclassified folder if exists
+            mis_save_root = os.path.join(save_path, "misclassified_best_val")
+            if os.path.exists(mis_save_root):
+                shutil.rmtree(mis_save_root)
+
+            # Save Val and Test misclassified images
+            _save_misclassified(writer, epoch, "Val", val_mis_info, mis_save_root)
+            _save_misclassified(writer, epoch, "Test", test_mis_info, mis_save_root)
         else:
             epochs_no_improve += 1
 
