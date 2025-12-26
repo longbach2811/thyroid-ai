@@ -32,6 +32,9 @@ def training_loops(
     global_step = 0
     best_gen_loss = float('inf')
 
+    gen_model.train()
+    disc_model.train()
+
     for epoch in range(num_epochs):
         epoch_gen_loss = 0.0
         for batch_idx, (real, _) in enumerate(tqdm(data_loader)):
