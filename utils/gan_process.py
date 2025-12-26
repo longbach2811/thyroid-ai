@@ -81,7 +81,6 @@ def training_loops(
             img_grid_fake = torchvision.utils.make_grid(fake[:32], normalize=True, value_range=(-1, 1))
             writer.add_image("Real Images", img_grid_real, epoch)
             writer.add_image("Fake Images", img_grid_fake, epoch)
-            torchvision.utils.save_image(fake[:32], os.path.join(save_path, f"gen_epoch_{epoch+1}.png"), normalize=True, value_range=(-1, 1))
 
         if avg_gen_loss < best_gen_loss:
             best_gen_loss = avg_gen_loss
