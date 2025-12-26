@@ -27,9 +27,6 @@ def training_loops(
         device,
         num_epochs,
         save_path,
-        scheduler=None,
-        period=1,
-        patience=None
     ):
     writer = SummaryWriter(log_dir=os.path.join(save_path, "logs"))
     global_step = 0
@@ -79,7 +76,7 @@ def training_loops(
                 img_grid_fake = torchvision.utils.make_grid(fake[:32], normalize=True)
                 writer.add_image("Real Images", img_grid_real, epoch)
                 writer.add_image("Fake Images", img_grid_fake, epoch)
-                
+
         avg_gen_loss = epoch_gen_loss / len(data_loader)
         if avg_gen_loss < best_gen_loss:
             best_gen_loss = avg_gen_loss
