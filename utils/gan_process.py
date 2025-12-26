@@ -29,7 +29,6 @@ def training_loops(
         save_path,
     ):
     writer = SummaryWriter(log_dir=os.path.join(save_path, "logs"))
-    global_step = 0
     best_gen_loss = float('inf')
 
     gen_model.train()
@@ -37,6 +36,7 @@ def training_loops(
 
     for epoch in range(num_epochs):
         epoch_gen_loss = 0.0
+        epoch_disc_loss = 0.0
         for batch_idx, (real, _) in enumerate(tqdm(data_loader)):
             real = real.to(device)
 
@@ -62,25 +62,27 @@ def training_loops(
             loss_gen.backward()
             gen_optimizer.step()
             epoch_gen_loss += loss_gen.item()
-            
-            global_step += 1
-            writer.add_scalar("Loss/Discriminator", loss_disc.item(), global_step)
-            writer.add_scalar("Loss/Generator", loss_gen.item(), global_step)
-
-            print(
-                f"Epoch [{epoch+1}/{num_epochs}] Batch {batch_idx+1}/{len(data_loader)} \
-                  Loss D: {loss_disc.item():.4f}, loss G: {loss_gen.item():.4f}"
-            )
-
-            with torch.no_grad():
-                fixed_noise = torch.randn(32, noise_dim, 1, 1).to(device)
-                fake = gen_model(fixed_noise)
-                img_grid_real = torchvision.utils.make_grid(real[:32], normalize=True)
-                img_grid_fake = torchvision.utils.make_grid(fake[:32], normalize=True)
-                writer.add_image("Real Images", img_grid_real, epoch)
-                writer.add_image("Fake Images", img_grid_fake, epoch)
+            epoch_disc_loss += loss_disc.item()
 
         avg_gen_loss = epoch_gen_loss / len(data_loader)
+        avg_disc_loss = epoch_disc_loss / len(data_loader)
+        
+        writer.add_scalar("Loss/Discriminator", avg_disc_loss, epoch)
+        writer.add_scalar("Loss/Generator", avg_gen_loss, epoch)
+
+        print(
+            f"Epoch [{epoch+1}/{num_epochs}] Loss D: {avg_disc_loss:.4f}, loss G: {avg_gen_loss:.4f}"
+        )
+
+        with torch.no_grad():
+            fixed_noise = torch.randn(32, noise_dim, 1, 1).to(device)
+            fake = gen_model(fixed_noise)
+            img_grid_real = torchvision.utils.make_grid(real[:32], normalize=True, value_range=(-1, 1))
+            img_grid_fake = torchvision.utils.make_grid(fake[:32], normalize=True, value_range=(-1, 1))
+            writer.add_image("Real Images", img_grid_real, epoch)
+            writer.add_image("Fake Images", img_grid_fake, epoch)
+            torchvision.utils.save_image(fake[:32], os.path.join(save_path, f"gen_epoch_{epoch+1}.png"), normalize=True, value_range=(-1, 1))
+
         if avg_gen_loss < best_gen_loss:
             best_gen_loss = avg_gen_loss
             torch.save(gen_model.state_dict(), os.path.join(save_path, "best_gen.pth"))
