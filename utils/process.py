@@ -279,9 +279,6 @@ def training_loops(
             torch.save(model.state_dict(), os.path.join(save_path, "best_model.pth"))
             print("Best model saved.")
 
-            print("Validation Classification Report:\n", val_report)
-            print("Test Classification Report:\n", test_report)
-
             # Clean up old misclassified folder if exists
             mis_save_root = os.path.join(save_path, "misclassified_best_val")
             if os.path.exists(mis_save_root):
