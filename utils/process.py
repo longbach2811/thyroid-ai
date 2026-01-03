@@ -54,14 +54,14 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch, num_
 
     # Calculate metrics robustly for both binary and multiclass
     mcm = multilabel_confusion_matrix(targets_array, preds_array)
-    tn = mcm[:, 0, 0]
-    fp = mcm[:, 0, 1]
-    fn = mcm[:, 1, 0]
-    tp = mcm[:, 1, 1]
-    sensitivity = np.mean(np.divide(tp, tp + fn, out=np.zeros_like(tp, dtype=float), where=(tp + fn) != 0))
-    specificity = np.mean(np.divide(tn, tn + fp, out=np.zeros_like(tn, dtype=float), where=(tn + fp) != 0))
-    ppv = np.mean(np.divide(tp, tp + fp, out=np.zeros_like(tp, dtype=float), where=(tp + fp) != 0))
-    npv = np.mean(np.divide(tn, tn + fn, out=np.zeros_like(tn, dtype=float), where=(tn + fn) != 0))
+    tn = mcm[:, 0, 0].sum()
+    fp = mcm[:, 0, 1].sum()
+    fn = mcm[:, 1, 0].sum()
+    tp = mcm[:, 1, 1].sum()
+    sensitivity = tp / (tp + fn) if (tp + fn) != 0 else 0.0
+    specificity = tn / (tn + fp) if (tn + fp) != 0 else 0.0
+    ppv = tp / (tp + fp) if (tp + fp) != 0 else 0.0
+    npv = tn / (tn + fn) if (tn + fn) != 0 else 0.0
 
     try:
         if probs_array.shape[1] == 2:
@@ -129,14 +129,14 @@ def validate_one_epoch(
 
     # Calculate metrics robustly
     mcm = multilabel_confusion_matrix(targets_array, preds_array)
-    tn = mcm[:, 0, 0]
-    fp = mcm[:, 0, 1]
-    fn = mcm[:, 1, 0]
-    tp = mcm[:, 1, 1]
-    sensitivity = np.mean(np.divide(tp, tp + fn, out=np.zeros_like(tp, dtype=float), where=(tp + fn) != 0))
-    specificity = np.mean(np.divide(tn, tn + fp, out=np.zeros_like(tn, dtype=float), where=(tn + fp) != 0))
-    ppv = np.mean(np.divide(tp, tp + fp, out=np.zeros_like(tp, dtype=float), where=(tp + fp) != 0))
-    npv = np.mean(np.divide(tn, tn + fn, out=np.zeros_like(tn, dtype=float), where=(tn + fn) != 0))
+    tn = mcm[:, 0, 0].sum()
+    fp = mcm[:, 0, 1].sum()
+    fn = mcm[:, 1, 0].sum()
+    tp = mcm[:, 1, 1].sum()
+    sensitivity = tp / (tp + fn) if (tp + fn) != 0 else 0.0
+    specificity = tn / (tn + fp) if (tn + fp) != 0 else 0.0
+    ppv = tp / (tp + fp) if (tp + fp) != 0 else 0.0
+    npv = tn / (tn + fn) if (tn + fn) != 0 else 0.0
     
     cm = confusion_matrix(targets_array, preds_array)
     report = classification_report(targets_array, preds_array, zero_division=0)
