@@ -5,7 +5,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
-from sklearn.metrics import precision_score, recall_score, roc_auc_score, multilabel_confusion_matrix, confusion_matrix
+from sklearn.metrics import precision_score, recall_score, roc_auc_score, multilabel_confusion_matrix, confusion_matrix, roc_curve
 import torch.optim.lr_scheduler as lr_scheduler
 from torchvision.utils import save_image
 import matplotlib.pyplot as plt
@@ -46,10 +46,16 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch, num_
     preds_array = np.concatenate(preds_list)
     targets_array = np.concatenate(targets_list)
 
-    precision = precision_score(
+    if probs_array.shape[1] == 2:
+        fpr, tpr, thresholds = roc_curve(targets_array, probs_array[:, 1])
+        j_scores = tpr - fpr
+        best_threshold = thresholds[np.argmax(j_scores)]
+        preds_array = (probs_array[:, 1] >= best_threshold).astype(int)
+
+    ppv = precision_score(
         targets_array, preds_array, average="macro", zero_division=0
     )
-    recall = recall_score(targets_array, preds_array, average="macro", zero_division=0)
+    sensitivity = recall_score(targets_array, preds_array, average="macro", zero_division=0)
 
     mcm = multilabel_confusion_matrix(targets_array, preds_array)
     tn = mcm[:, 0, 0]
@@ -68,7 +74,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch, num_
     except ValueError:
         auc = 0.0
 
-    return epoch_loss, precision, recall, specificity, npv, auc
+    return epoch_loss, sensitivity, specificity, ppv, npv, auc
 
 
 def validate_one_epoch(
@@ -116,10 +122,16 @@ def validate_one_epoch(
     preds_array = np.concatenate(preds_list)
     targets_array = np.concatenate(targets_list)
 
-    precision = precision_score(
+    if probs_array.shape[1] == 2:
+        fpr, tpr, thresholds = roc_curve(targets_array, probs_array[:, 1])
+        j_scores = tpr - fpr
+        best_threshold = thresholds[np.argmax(j_scores)]
+        preds_array = (probs_array[:, 1] >= best_threshold).astype(int)
+
+    ppv = precision_score(
         targets_array, preds_array, average="macro", zero_division=0
     )
-    recall = recall_score(targets_array, preds_array, average="macro", zero_division=0)
+    sensitivity = recall_score(targets_array, preds_array, average="macro", zero_division=0)
 
     mcm = multilabel_confusion_matrix(targets_array, preds_array)
     tn = mcm[:, 0, 0]
@@ -139,7 +151,7 @@ def validate_one_epoch(
     except ValueError:
         auc = 0.0
 
-    return epoch_loss, precision, recall, specificity, npv, auc, cm, (misclassified_imgs, misclassified_targets, misclassified_preds)
+    return epoch_loss, sensitivity, specificity, ppv, npv, auc, cm, (misclassified_imgs, misclassified_targets, misclassified_preds)
 
 
 def _save_misclassified(writer, epoch, tag, mis_info, save_root):
@@ -211,46 +223,46 @@ def training_loops(
     epochs_no_improve = 0
 
     for epoch in range(num_epochs):
-        train_loss, train_precision, train_recall, train_specificity, train_npv, train_auc = train_one_epoch(
+        train_loss, train_sensitivity, train_specificity, train_ppv, train_npv, train_auc = train_one_epoch(
             model, train_dataloader, criterion, optimizer, device, epoch, num_epochs
         )
-        val_loss, val_precision, val_recall, val_specificity, val_npv, val_auc, val_cm, val_mis_info = validate_one_epoch(
+        val_loss, val_sensitivity, val_specificity, val_ppv, val_npv, val_auc, val_cm, val_mis_info = validate_one_epoch(
             model, val_dataloader, criterion, device, epoch, num_epochs
         )
-        test_loss, test_precision, test_recall, test_specificity, test_npv, test_auc, test_cm, test_mis_info = validate_one_epoch(
+        test_loss, test_sensitivity, test_specificity, test_ppv, test_npv, test_auc, test_cm, test_mis_info = validate_one_epoch(
             model, test_dataloader, criterion, device, epoch, num_epochs
         )
 
         print(f"Epoch [{epoch+1}/{num_epochs}]")
         print(
-            f"    [Train] Loss: {train_loss:.4f}, Precision: {train_precision:.4f}, Recall: {train_recall:.4f}, Specificity: {train_specificity:.4f}, NPV: {train_npv:.4f}, AUC: {train_auc:.4f}"
+            f"    [Train] Loss: {train_loss:.4f}, Sensitivity: {train_sensitivity:.4f}, Specificity: {train_specificity:.4f}, PPV: {train_ppv:.4f}, NPV: {train_npv:.4f}, AUC: {train_auc:.4f}"
         )
         print(
-            f"    [Val]   Loss: {val_loss:.4f}, Precision: {val_precision:.4f}, Recall: {val_recall:.4f}, Specificity: {val_specificity:.4f}, NPV: {val_npv:.4f}, AUC: {val_auc:.4f}"
+            f"    [Val]   Loss: {val_loss:.4f}, Sensitivity: {val_sensitivity:.4f}, Specificity: {val_specificity:.4f}, PPV: {val_ppv:.4f}, NPV: {val_npv:.4f}, AUC: {val_auc:.4f}"
         )
         print(
-            f"    [Test]  Loss: {test_loss:.4f}, Precision: {test_precision:.4f}, Recall: {test_recall:.4f}, Specificity: {test_specificity:.4f}, NPV: {test_npv:.4f}, AUC: {test_auc:.4f}"
+            f"    [Test]  Loss: {test_loss:.4f}, Sensitivity: {test_sensitivity:.4f}, Specificity: {test_specificity:.4f}, PPV: {test_ppv:.4f}, NPV: {test_npv:.4f}, AUC: {test_auc:.4f}"
         )
 
         # Log scalars to TensorBoard
         writer.add_scalar("Loss/train", train_loss, epoch)
-        writer.add_scalar("Precision/train", train_precision, epoch)
-        writer.add_scalar("Recall/train", train_recall, epoch)
+        writer.add_scalar("Sensitivity/train", train_sensitivity, epoch)
         writer.add_scalar("Specificity/train", train_specificity, epoch)
+        writer.add_scalar("PPV/train", train_ppv, epoch)
         writer.add_scalar("NPV/train", train_npv, epoch)
         writer.add_scalar("AUC/train", train_auc, epoch)
 
         writer.add_scalar("Loss/val", val_loss, epoch)
-        writer.add_scalar("Precision/val", val_precision, epoch)
-        writer.add_scalar("Recall/val", val_recall, epoch)
+        writer.add_scalar("Sensitivity/val", val_sensitivity, epoch)
         writer.add_scalar("Specificity/val", val_specificity, epoch)
+        writer.add_scalar("PPV/val", val_ppv, epoch)
         writer.add_scalar("NPV/val", val_npv, epoch)
         writer.add_scalar("AUC/val", val_auc, epoch)
 
         writer.add_scalar("Loss/test", test_loss, epoch)
-        writer.add_scalar("Precision/test", test_precision, epoch)
-        writer.add_scalar("Recall/test", test_recall, epoch)
+        writer.add_scalar("Sensitivity/test", test_sensitivity, epoch)
         writer.add_scalar("Specificity/test", test_specificity, epoch)
+        writer.add_scalar("PPV/test", test_ppv, epoch)
         writer.add_scalar("NPV/test", test_npv, epoch)
         writer.add_scalar("AUC/test", test_auc, epoch)
         writer.add_scalar("LearningRate", optimizer.param_groups[0]["lr"], epoch)
