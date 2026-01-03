@@ -5,7 +5,7 @@ import torch
 import numpy as np
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
-from sklearn.metrics import precision_score, recall_score, roc_auc_score, multilabel_confusion_matrix, confusion_matrix, roc_curve
+from sklearn.metrics import roc_auc_score, confusion_matrix, roc_curve, classification_report, multilabel_confusion_matrix
 import torch.optim.lr_scheduler as lr_scheduler
 from torchvision.utils import save_image
 import matplotlib.pyplot as plt
@@ -52,16 +52,15 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch, num_
         best_threshold = thresholds[np.argmax(j_scores)]
         preds_array = (probs_array[:, 1] >= best_threshold).astype(int)
 
-    ppv = precision_score(
-        targets_array, preds_array, average="macro", zero_division=0
-    )
-    sensitivity = recall_score(targets_array, preds_array, average="macro", zero_division=0)
-
+    # Calculate metrics robustly for both binary and multiclass
     mcm = multilabel_confusion_matrix(targets_array, preds_array)
     tn = mcm[:, 0, 0]
     fp = mcm[:, 0, 1]
     fn = mcm[:, 1, 0]
+    tp = mcm[:, 1, 1]
+    sensitivity = np.mean(np.divide(tp, tp + fn, out=np.zeros_like(tp, dtype=float), where=(tp + fn) != 0))
     specificity = np.mean(np.divide(tn, tn + fp, out=np.zeros_like(tn, dtype=float), where=(tn + fp) != 0))
+    ppv = np.mean(np.divide(tp, tp + fp, out=np.zeros_like(tp, dtype=float), where=(tp + fp) != 0))
     npv = np.mean(np.divide(tn, tn + fn, out=np.zeros_like(tn, dtype=float), where=(tn + fn) != 0))
 
     try:
@@ -128,18 +127,19 @@ def validate_one_epoch(
         best_threshold = thresholds[np.argmax(j_scores)]
         preds_array = (probs_array[:, 1] >= best_threshold).astype(int)
 
-    ppv = precision_score(
-        targets_array, preds_array, average="macro", zero_division=0
-    )
-    sensitivity = recall_score(targets_array, preds_array, average="macro", zero_division=0)
-
+    # Calculate metrics robustly
     mcm = multilabel_confusion_matrix(targets_array, preds_array)
     tn = mcm[:, 0, 0]
     fp = mcm[:, 0, 1]
     fn = mcm[:, 1, 0]
+    tp = mcm[:, 1, 1]
+    sensitivity = np.mean(np.divide(tp, tp + fn, out=np.zeros_like(tp, dtype=float), where=(tp + fn) != 0))
     specificity = np.mean(np.divide(tn, tn + fp, out=np.zeros_like(tn, dtype=float), where=(tn + fp) != 0))
+    ppv = np.mean(np.divide(tp, tp + fp, out=np.zeros_like(tp, dtype=float), where=(tp + fp) != 0))
     npv = np.mean(np.divide(tn, tn + fn, out=np.zeros_like(tn, dtype=float), where=(tn + fn) != 0))
+    
     cm = confusion_matrix(targets_array, preds_array)
+    report = classification_report(targets_array, preds_array, zero_division=0)
 
     try:
         if probs_array.shape[1] == 2:
@@ -151,7 +151,7 @@ def validate_one_epoch(
     except ValueError:
         auc = 0.0
 
-    return epoch_loss, sensitivity, specificity, ppv, npv, auc, cm, (misclassified_imgs, misclassified_targets, misclassified_preds)
+    return epoch_loss, sensitivity, specificity, ppv, npv, auc, cm, report, (misclassified_imgs, misclassified_targets, misclassified_preds)
 
 
 def _save_misclassified(writer, epoch, tag, mis_info, save_root):
@@ -226,10 +226,10 @@ def training_loops(
         train_loss, train_sensitivity, train_specificity, train_ppv, train_npv, train_auc = train_one_epoch(
             model, train_dataloader, criterion, optimizer, device, epoch, num_epochs
         )
-        val_loss, val_sensitivity, val_specificity, val_ppv, val_npv, val_auc, val_cm, val_mis_info = validate_one_epoch(
+        val_loss, val_sensitivity, val_specificity, val_ppv, val_npv, val_auc, val_cm, val_report, val_mis_info = validate_one_epoch(
             model, val_dataloader, criterion, device, epoch, num_epochs
         )
-        test_loss, test_sensitivity, test_specificity, test_ppv, test_npv, test_auc, test_cm, test_mis_info = validate_one_epoch(
+        test_loss, test_sensitivity, test_specificity, test_ppv, test_npv, test_auc, test_cm, test_report, test_mis_info = validate_one_epoch(
             model, test_dataloader, criterion, device, epoch, num_epochs
         )
 
@@ -278,6 +278,9 @@ def training_loops(
             epochs_no_improve = 0
             torch.save(model.state_dict(), os.path.join(save_path, "best_model.pth"))
             print("Best model saved.")
+
+            print("Validation Classification Report:\n", val_report)
+            print("Test Classification Report:\n", test_report)
 
             # Clean up old misclassified folder if exists
             mis_save_root = os.path.join(save_path, "misclassified_best_val")
