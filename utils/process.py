@@ -5,9 +5,11 @@ import torch
 import numpy as np
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
-from sklearn.metrics import precision_score, recall_score, roc_auc_score
+from sklearn.metrics import precision_score, recall_score, roc_auc_score, multilabel_confusion_matrix, confusion_matrix
 import torch.optim.lr_scheduler as lr_scheduler
 from torchvision.utils import save_image
+import matplotlib.pyplot as plt
+import itertools
 
 
 def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch, num_epochs):
@@ -49,6 +51,13 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch, num_
     )
     recall = recall_score(targets_array, preds_array, average="macro", zero_division=0)
 
+    mcm = multilabel_confusion_matrix(targets_array, preds_array)
+    tn = mcm[:, 0, 0]
+    fp = mcm[:, 0, 1]
+    fn = mcm[:, 1, 0]
+    specificity = np.mean(np.divide(tn, tn + fp, out=np.zeros_like(tn, dtype=float), where=(tn + fp) != 0))
+    npv = np.mean(np.divide(tn, tn + fn, out=np.zeros_like(tn, dtype=float), where=(tn + fn) != 0))
+
     try:
         if probs_array.shape[1] == 2:
             auc = roc_auc_score(targets_array, probs_array[:, 1])
@@ -59,7 +68,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch, num_
     except ValueError:
         auc = 0.0
 
-    return epoch_loss, precision, recall, auc
+    return epoch_loss, precision, recall, specificity, npv, auc
 
 
 def validate_one_epoch(
@@ -111,6 +120,15 @@ def validate_one_epoch(
         targets_array, preds_array, average="macro", zero_division=0
     )
     recall = recall_score(targets_array, preds_array, average="macro", zero_division=0)
+
+    mcm = multilabel_confusion_matrix(targets_array, preds_array)
+    tn = mcm[:, 0, 0]
+    fp = mcm[:, 0, 1]
+    fn = mcm[:, 1, 0]
+    specificity = np.mean(np.divide(tn, tn + fp, out=np.zeros_like(tn, dtype=float), where=(tn + fp) != 0))
+    npv = np.mean(np.divide(tn, tn + fn, out=np.zeros_like(tn, dtype=float), where=(tn + fn) != 0))
+    cm = confusion_matrix(targets_array, preds_array)
+
     try:
         if probs_array.shape[1] == 2:
             auc = roc_auc_score(targets_array, probs_array[:, 1])
@@ -121,7 +139,7 @@ def validate_one_epoch(
     except ValueError:
         auc = 0.0
 
-    return epoch_loss, precision, recall, auc, (misclassified_imgs, misclassified_targets, misclassified_preds)
+    return epoch_loss, precision, recall, specificity, npv, auc, cm, (misclassified_imgs, misclassified_targets, misclassified_preds)
 
 
 def _save_misclassified(writer, epoch, tag, mis_info, save_root):
@@ -151,6 +169,28 @@ def _save_misclassified(writer, epoch, tag, mis_info, save_root):
         save_image(img.float(), os.path.join(save_folder, f"epoch_{epoch+1}_img_{i}_true_{t}_pred_{p}.png"))
 
 
+def _plot_confusion_matrix(cm, classes, title='Confusion Matrix'):
+    fig = plt.figure(figsize=(8, 8))
+    plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+    plt.title(title)
+    plt.colorbar()
+    tick_marks = np.arange(len(classes))
+    plt.xticks(tick_marks, classes, rotation=45)
+    plt.yticks(tick_marks, classes)
+
+    fmt = 'd'
+    thresh = cm.max() / 2.
+    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+        plt.text(j, i, format(cm[i, j], fmt),
+                 horizontalalignment="center",
+                 color="white" if cm[i, j] > thresh else "black")
+
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
+    plt.tight_layout()
+    return fig
+
+
 def training_loops(
     model,
     train_dataloader,
@@ -171,41 +211,47 @@ def training_loops(
     epochs_no_improve = 0
 
     for epoch in range(num_epochs):
-        train_loss, train_precision, train_recall, train_auc = train_one_epoch(
+        train_loss, train_precision, train_recall, train_specificity, train_npv, train_auc = train_one_epoch(
             model, train_dataloader, criterion, optimizer, device, epoch, num_epochs
         )
-        val_loss, val_precision, val_recall, val_auc, val_mis_info = validate_one_epoch(
+        val_loss, val_precision, val_recall, val_specificity, val_npv, val_auc, val_cm, val_mis_info = validate_one_epoch(
             model, val_dataloader, criterion, device, epoch, num_epochs
         )
-        test_loss, test_precision, test_recall, test_auc, test_mis_info = validate_one_epoch(
+        test_loss, test_precision, test_recall, test_specificity, test_npv, test_auc, test_cm, test_mis_info = validate_one_epoch(
             model, test_dataloader, criterion, device, epoch, num_epochs
         )
 
         print(f"Epoch [{epoch+1}/{num_epochs}]")
         print(
-            f"    [Train] Loss: {train_loss:.4f}, Precision: {train_precision:.4f}, Recall: {train_recall:.4f}, AUC: {train_auc:.4f}"
+            f"    [Train] Loss: {train_loss:.4f}, Precision: {train_precision:.4f}, Recall: {train_recall:.4f}, Specificity: {train_specificity:.4f}, NPV: {train_npv:.4f}, AUC: {train_auc:.4f}"
         )
         print(
-            f"    [Val]   Loss: {val_loss:.4f}, Precision: {val_precision:.4f}, Recall: {val_recall:.4f}, AUC: {val_auc:.4f}"
+            f"    [Val]   Loss: {val_loss:.4f}, Precision: {val_precision:.4f}, Recall: {val_recall:.4f}, Specificity: {val_specificity:.4f}, NPV: {val_npv:.4f}, AUC: {val_auc:.4f}"
         )
         print(
-            f"    [Test]  Loss: {test_loss:.4f}, Precision: {test_precision:.4f}, Recall: {test_recall:.4f}, AUC: {test_auc:.4f}"
+            f"    [Test]  Loss: {test_loss:.4f}, Precision: {test_precision:.4f}, Recall: {test_recall:.4f}, Specificity: {test_specificity:.4f}, NPV: {test_npv:.4f}, AUC: {test_auc:.4f}"
         )
 
         # Log scalars to TensorBoard
         writer.add_scalar("Loss/train", train_loss, epoch)
         writer.add_scalar("Precision/train", train_precision, epoch)
         writer.add_scalar("Recall/train", train_recall, epoch)
+        writer.add_scalar("Specificity/train", train_specificity, epoch)
+        writer.add_scalar("NPV/train", train_npv, epoch)
         writer.add_scalar("AUC/train", train_auc, epoch)
 
         writer.add_scalar("Loss/val", val_loss, epoch)
         writer.add_scalar("Precision/val", val_precision, epoch)
         writer.add_scalar("Recall/val", val_recall, epoch)
+        writer.add_scalar("Specificity/val", val_specificity, epoch)
+        writer.add_scalar("NPV/val", val_npv, epoch)
         writer.add_scalar("AUC/val", val_auc, epoch)
 
         writer.add_scalar("Loss/test", test_loss, epoch)
         writer.add_scalar("Precision/test", test_precision, epoch)
         writer.add_scalar("Recall/test", test_recall, epoch)
+        writer.add_scalar("Specificity/test", test_specificity, epoch)
+        writer.add_scalar("NPV/test", test_npv, epoch)
         writer.add_scalar("AUC/test", test_auc, epoch)
         writer.add_scalar("LearningRate", optimizer.param_groups[0]["lr"], epoch)
 
@@ -229,6 +275,14 @@ def training_loops(
             # Save Val and Test misclassified images
             _save_misclassified(writer, epoch, "Val", val_mis_info, mis_save_root)
             _save_misclassified(writer, epoch, "Test", test_mis_info, mis_save_root)
+
+            # Log Confusion Matrix
+            val_cm_fig = _plot_confusion_matrix(val_cm, classes=np.arange(val_cm.shape[0]), title="Validation Confusion Matrix")
+            writer.add_figure("Confusion_Matrix/Val", val_cm_fig, epoch)
+            plt.close(val_cm_fig)
+            test_cm_fig = _plot_confusion_matrix(test_cm, classes=np.arange(test_cm.shape[0]), title="Test Confusion Matrix")
+            writer.add_figure("Confusion_Matrix/Test", test_cm_fig, epoch)
+            plt.close(test_cm_fig)
         else:
             epochs_no_improve += 1
 
