@@ -53,15 +53,17 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, epoch, num_
         preds_array = (probs_array[:, 1] >= best_threshold).astype(int)
 
     # Calculate metrics robustly for both binary and multiclass
-    mcm = multilabel_confusion_matrix(targets_array, preds_array)
-    tn = mcm[:, 0, 0].sum()
-    fp = mcm[:, 0, 1].sum()
-    fn = mcm[:, 1, 0].sum()
-    tp = mcm[:, 1, 1].sum()
-    sensitivity = tp / (tp + fn) if (tp + fn) != 0 else 0.0
-    specificity = tn / (tn + fp) if (tn + fp) != 0 else 0.0
-    ppv = tp / (tp + fp) if (tp + fp) != 0 else 0.0
-    npv = tn / (tn + fn) if (tn + fn) != 0 else 0.0
+    mcm = multilabel_confusion_matrix(
+        targets_array, preds_array, labels=[0, 1]
+    )
+
+    # class 1 = malignant (positive class)
+    tn, fp, fn, tp = mcm[1].ravel()
+
+    sensitivity = tp / (tp + fn) if (tp + fn) else 0.0
+    specificity = tn / (tn + fp) if (tn + fp) else 0.0
+    ppv        = tp / (tp + fp) if (tp + fp) else 0.0
+    npv        = tn / (tn + fn) if (tn + fn) else 0.0
 
     try:
         if probs_array.shape[1] == 2:
@@ -128,15 +130,17 @@ def validate_one_epoch(
         preds_array = (probs_array[:, 1] >= best_threshold).astype(int)
 
     # Calculate metrics robustly
-    mcm = multilabel_confusion_matrix(targets_array, preds_array)
-    tn = mcm[:, 0, 0].sum()
-    fp = mcm[:, 0, 1].sum()
-    fn = mcm[:, 1, 0].sum()
-    tp = mcm[:, 1, 1].sum()
-    sensitivity = tp / (tp + fn) if (tp + fn) != 0 else 0.0
-    specificity = tn / (tn + fp) if (tn + fp) != 0 else 0.0
-    ppv = tp / (tp + fp) if (tp + fp) != 0 else 0.0
-    npv = tn / (tn + fn) if (tn + fn) != 0 else 0.0
+    mcm = multilabel_confusion_matrix(
+        targets_array, preds_array, labels=[0, 1]
+    )
+
+    # class 1 = malignant (positive class)
+    tn, fp, fn, tp = mcm[1].ravel()
+
+    sensitivity = tp / (tp + fn) if (tp + fn) else 0.0
+    specificity = tn / (tn + fp) if (tn + fp) else 0.0
+    ppv        = tp / (tp + fp) if (tp + fp) else 0.0
+    npv        = tn / (tn + fn) if (tn + fn) else 0.0
     
     cm = confusion_matrix(targets_array, preds_array)
     report = classification_report(targets_array, preds_array, zero_division=0)
@@ -278,6 +282,7 @@ def training_loops(
             epochs_no_improve = 0
             torch.save(model.state_dict(), os.path.join(save_path, "best_model.pth"))
             print("Best model saved.")
+
 
             # Clean up old misclassified folder if exists
             mis_save_root = os.path.join(save_path, "misclassified_best_val")
