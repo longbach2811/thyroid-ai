@@ -8,6 +8,8 @@ import torch.optim as optim
 import os
 import argparse
 import csv
+import numpy as np
+from sklearn.metrics import classification_report, multilabel_confusion_matrix, roc_curve, roc_auc_score, confusion_matrix
 
 
 def _init_model(args, num_classes):
@@ -44,20 +46,63 @@ def test_model(args):
     model = model.to(device)
     model.eval()
     
-    results = []
+    probs_list = []
+    targets_list = []
+    img_names = []
     print(f"Starting inference on {len(test_dataset)} images...")
 
     with torch.no_grad():
-        for i, (images, _) in enumerate(test_loader):
+        for i, (images, labels) in enumerate(test_loader):
             images = images.to(device)
             outputs = model(images)
-            _, preds = torch.max(outputs, 1)
+            probs = torch.softmax(outputs, dim=1)
             
+            probs_list.append(probs.cpu().numpy())
+            targets_list.append(labels.numpy())
+
             img_path = test_dataset.image_paths[i]
             img_name = os.path.basename(img_path)
-            pred_class = test_dataset.class_names[preds.item()]
-            
-            results.append([img_name, pred_class])
+            img_names.append(img_name)
+
+    probs_array = np.concatenate(probs_list)
+    targets_array = np.concatenate(targets_list)
+    preds_array = np.argmax(probs_array, axis=1)
+
+    if probs_array.shape[1] == 2:
+        fpr, tpr, thresholds = roc_curve(targets_array, probs_array[:, 1])
+        j_scores = tpr - fpr
+        best_threshold = thresholds[np.argmax(j_scores)]
+        print(f"Best threshold (Youden): {best_threshold:.4f}")
+        preds_array = (probs_array[:, 1] >= best_threshold).astype(int)
+
+    # Calculate metrics
+    if probs_array.shape[1] == 2:
+        mcm = multilabel_confusion_matrix(targets_array, preds_array, labels=[0, 1])
+        tn, fp, fn, tp = mcm[1].ravel()
+        sensitivity = tp / (tp + fn) if (tp + fn) else 0.0
+        specificity = tn / (tn + fp) if (tn + fp) else 0.0
+        ppv = tp / (tp + fp) if (tp + fp) else 0.0
+        npv = tn / (tn + fn) if (tn + fn) else 0.0
+        auc = roc_auc_score(targets_array, probs_array[:, 1])
+        print(f"Sensitivity: {sensitivity:.4f}, Specificity: {specificity:.4f}, PPV: {ppv:.4f}, NPV: {npv:.4f}, AUC: {auc:.4f}")
+    else:
+        auc = roc_auc_score(targets_array, probs_array, multi_class="ovr", average="macro")
+        print(f"AUC: {auc:.4f}")
+
+    print("\nClassification Report:")
+    print(classification_report(targets_array, preds_array, zero_division=0))
+    print("\nConfusion Matrix:")
+    print(confusion_matrix(targets_array, preds_array))
+
+    results = []
+    for i, img_name in enumerate(img_names):
+        pred_class = test_dataset.class_names[preds_array[i]]
+        true_class = test_dataset.class_names[targets_array[i]]
+        if probs_array.shape[1] == 2:
+            prob = probs_array[i, 1]
+        else:
+            prob = np.max(probs_array[i])
+        results.append([img_name, pred_class])
             
     os.makedirs(os.path.dirname(args.output) if os.path.dirname(args.output) else ".", exist_ok=True)
     with open(args.output, mode="w", newline="", encoding="utf-8") as f:
