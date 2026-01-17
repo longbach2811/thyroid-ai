@@ -92,7 +92,16 @@ def test_model(args):
     print("\nClassification Report:")
     print(classification_report(targets_array, preds_array, zero_division=0))
     print("\nConfusion Matrix:")
-    print(confusion_matrix(targets_array, preds_array))
+    cm = confusion_matrix(targets_array, preds_array)
+    print(cm)
+
+    cm_output_path = os.path.join(os.path.dirname(args.output) if os.path.dirname(args.output) else ".", "confusion_matrix.csv")
+    with open(cm_output_path, mode="w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["True/Pred"] + test_dataset.class_names)
+        for i, row in enumerate(cm):
+            writer.writerow([test_dataset.class_names[i]] + row.tolist())
+    print(f"Confusion matrix saved to {cm_output_path}")
 
     results = []
     for i, img_name in enumerate(img_names):
