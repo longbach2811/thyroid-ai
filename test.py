@@ -105,7 +105,8 @@ def test_model(args):
 
     results = []
     for i, img_name in enumerate(img_names):
-        pred_class = test_dataset.class_names[preds_array[i]]
+        pred_class_name = test_dataset.class_names[preds_array[i]]
+        target_class_name = test_dataset.class_names[targets_array[i]]
         
         p = preds_array[i]
         t = targets_array[i]
@@ -113,12 +114,12 @@ def test_model(args):
         tn = 1 if p == 0 and t == 0 else 0
         fp = 1 if p == 1 and t == 0 else 0
         fn = 1 if p == 0 and t == 1 else 0
-        results.append([img_name, pred_class, tp, tn, fp, fn])
+        results.append([img_name, target_class_name, pred_class_name, tp, tn, fp, fn])
             
     os.makedirs(os.path.dirname(args.output) if os.path.dirname(args.output) else ".", exist_ok=True)
     with open(args.output, mode="w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["image_name", "prediction", "TP", "TN", "FP", "FN"])
+        writer.writerow(["image_name", "target", "prediction", "TP", "TN", "FP", "FN"])
         writer.writerows(results)
         
     print(f"Predictions saved to {args.output}")
